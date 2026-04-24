@@ -4,8 +4,8 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
-from rbpodo import Cobot, SystemVariable, CobotData
-import rbpodo as rb
+from rbpodo_ros2 import Cobot, SystemVariable, CobotData
+import rbpodo_ros2 as rb
 import numpy as np
 
 ######## torque servo
@@ -82,7 +82,7 @@ def rb_get_joint_position():
     return np.array(jpos)
 
 
-model_path = "/home/kdh/Desktop/delto/delto_description2/rb3_single/scene_rb3.xml"
+model_path = "/home/chu/manipulator_control/rb5/scene_rb5.xml"
 m = mujoco.MjModel.from_xml_path(model_path)
 d = mujoco.MjData(m)
 
