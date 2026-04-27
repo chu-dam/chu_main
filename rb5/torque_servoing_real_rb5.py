@@ -10,7 +10,7 @@ import numpy as np
 
 ######## torque servo
 try:
-    ROBOT_ADDRESS = "192.169.1.200"
+    ROBOT_ADDRESS = "169.254.186.20"
 
     robot = rb.Cobot(ROBOT_ADDRESS)
     rc = rb.ResponseCollector()
@@ -18,7 +18,7 @@ try:
     robot_data = CobotData(ROBOT_ADDRESS)
     state = robot_data.request_data()
     
-    robot.set_operation_mode(rc, rb.OperationMode.Simulation)
+    robot.set_operation_mode(rc, rb.OperationMode.Real)
     robot.set_speed_bar(rc, 0.5)
     #robot.set_freedrive_mode(rc, on=False)
     t1 = 0.01 #이동시간
@@ -85,7 +85,7 @@ desired_xpos_tcp = np.array([0.0, -0.45, 0.35])
 desired_rpy = np.array([90.0, 0.0, 0.0])  # roll, pitch, yaw 입력
 # -----------------------------
 
-model_path = "/home/kdh/Desktop/delto/delto_description2/rb3_single/scene_rb3.xml"
+model_path = "/home/chu/manipulator_control/rb5/scene_rb5.xml"
 m = mujoco.MjModel.from_xml_path(model_path)
 d = mujoco.MjData(m)
 
@@ -203,13 +203,14 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
         # print(f"wo : {w0}")
 
         # Orientation Force
-        F_ori_0 = (K_o * ori_err0) #+ (zeta_o * np.sqrt(K_o) * w0)
+        F_ori_0 = (K_o * ori_err0) + (zeta_o * np.sqrt(K_o) * w0)
 
         # Linear Velocity
         xpos_dot0 = jacp0 @ d.qvel[0:6]
 
         # Linear Force 
         force0 = (K_a * xpos_err0) + (zeta_a * np.sqrt(K_a) * xpos_dot0)
+        
 
         # Friction Comp.
         # TODO 
@@ -222,9 +223,9 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
         
         # Torque (Coli + Gravity + Damping + Orientation)
         torque0 = (- 0 * C0 @ d.qvel[0:6] 
-                   - 0 * np.linalg.pinv(jacp0) @ force0 #j+acp0.T @ force0  # add exp func (prop err)
-                   + 1 * G[0:6] 
-                   - 0 * jacr0.T @ F_ori_0
+                   - 1 * jacp0.T @ force0
+                   + 0 * G[0:6] 
+                   - 1 * jacr0.T @ F_ori_0
                    + 0 * Tf[0:6])
         # print(f"torque 0 : {torque0}")
         
@@ -254,7 +255,7 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
         # 토크 서보잉 입력
         try:
             target_torque =  d.ctrl[0:6]
-            ret = robot.move_servo_t(rc, target_torque, t1, t2, compensation=2)
+            ret = robot.move_servo_t(rc, target_torque, t1, t2, compensation=3)
             # # comp 0 : u / 1 : u + g / 2 : u + f / 3 : u + g + f
             sleep(0.005) # t2 = 0.05
             if not ret.is_success():

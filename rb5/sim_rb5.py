@@ -102,8 +102,8 @@ K_pos = np.diag([40.0, 40.0, 40.0])
 D_pos = np.diag([20.0, 20.0, 20.0])
 
 
-K_ori = np.diag([1.0, 1.0, 1.0])
-D_ori = np.diag([0.3, 0.3, 0.3])
+K_ori = np.diag([10.0, 10.0, 10.0])
+D_ori = np.diag([1.0, 1.0, 1.0])
 
 max_total_torque = 150.0
 max_ori_torque = 30.0
