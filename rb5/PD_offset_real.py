@@ -104,20 +104,13 @@ def wait_move_finished(robot, rc, start_timeout=1.0):
 def move_j_to_initial_pose(robot, rc):
     init_joint_deg = np.array([90.0, 0.0, -90.0, 0.0, -90.0, 0.0], dtype=np.float64)
 
-    movej_speed = 60.0
-    movej_acc = 80.0
-
-    print("\n[INIT] move_j로 초기 자세 이동 시작")
-    print(f"[INIT] target joint deg = {init_joint_deg}")
-
     if hasattr(robot, "flush"):
         robot.flush(rc)
 
-    robot.move_j(rc, init_joint_deg, movej_speed, movej_acc)
+    robot.move_j(rc, init_joint_deg, 60.0, 80.0)
     wait_move_finished(robot, rc)
 
     sleep(0.3)
-    print("[INIT] move_j 완료")
 
 
 def virtual_offset_log_mm(
@@ -208,6 +201,8 @@ zeta_a_mat = np.diag([17.0, 17.0, 17.0])
 K_o = 20.0
 zeta_o = 7.0
 
+C0_gain = np.array([15.0, 20.0, 30.0, 1.0, 1.0, 1.0])
+
 # Orientation boost parameters
 ORI_BOOST_ENABLE = True
 ORI_BOOST_DEADBAND_DEG = 0.2
@@ -227,7 +222,7 @@ tau_rate_limit = np.array([20.0, 20.0, 20.0, 15.0, 15.0, 10.0])
 USE_VIRTUAL_TARGET = True
 
 LOG_ALPHA_MM = 1.0       # 로그항 계수 [mm]
-LOG_C_MM = 40            # 최소 가상 offset [mm]
+LOG_C_MM = 60            # 최소 가상 offset [mm]
 LOG_L_MAX_MM = LOG_C_MM  # 최대 가상 offset [mm]
 LOG_STOP_DIST_M = 0.001  # 1 mm 이내에서는 offset 제거
 
@@ -367,11 +362,17 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
 
         F_ori_0 = (K_o * ori_err0) + (zeta_o * np.sqrt(K_o) * w0) + M_boost
 
+        tau_joint_damping = -(np.diag(C0_gain) @ np.deg2rad(jvel))
+
+
         # ---------------------------------------------------------
         # Task force/moment -> joint torque
         # ---------------------------------------------------------
-        #torque0 = -(jacr0.T @ F_ori_0)
-        torque0 = - (jacp0.T @ force0) - (jacr0.T @ F_ori_0)
+        
+        torque0 = ( - 1.0 * (jacp0.T @ force0)
+                    - 1.0 * (jacr0.T @ F_ori_0)
+                    + 1.0 * tau_joint_damping
+                )
 
         target_torque_raw = np.clip(torque0, -max_torque, max_torque)
 
@@ -421,6 +422,7 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
         print(f"[RPY ERR DEG] {rpy_err}")
         print(f"[ORI ERR] {ori_err0}")
         print(f"[ORI ERR DEG] {ori_err_deg:.3f}")
+        print(f"[JOINT DAMP] {tau_joint_damping}")
         print(f"[M_BOOST] {M_boost}")
         #print(f"[TAR TOR RAW] {target_torque_raw}")
         #print(f"[TAR TOR] {target_torque}")

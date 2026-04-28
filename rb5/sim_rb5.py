@@ -62,7 +62,7 @@ d = mujoco.MjData(m)
 
 
 
-d.qpos[:] = [-0.5, 0.0, 1.0, 0.0, 0.0, 0.0]
+d.qpos[:] = [-0.0, -0.5, 2.0, 0.0, 0.0, 0.0]
 d.qvel[:] = 0.0
 
 mujoco.mj_forward(m, d)
@@ -99,11 +99,13 @@ jacr = np.zeros((3, m.nv), dtype=np.float64)
 
 # D_pos: N/(m/s)
 K_pos = np.diag([40.0, 40.0, 40.0])
-D_pos = np.diag([20.0, 20.0, 20.0])
+D_pos = np.diag([10.0, 10.0, 10.0])
 
 
 K_ori = np.diag([10.0, 10.0, 10.0])
 D_ori = np.diag([1.0, 1.0, 1.0])
+
+C0_gain = np.array([2.0, 4.0, 2.0, 1.0, 1.0, 1.0])
 
 max_total_torque = 150.0
 max_ori_torque = 30.0
@@ -187,8 +189,10 @@ with mujoco.viewer.launch_passive(
         # 자세 토크가 너무 커지는 것을 방지
         tau_ori = np.clip(tau_ori, -max_ori_torque, max_ori_torque)
 
+        tau_joint_damping = -(C0_gain * d.qvel[0:6])
+
         # 6. Total torque
-        torque0 = gravity_torque + tau_pos + tau_ori
+        torque0 = gravity_torque + tau_pos + tau_ori + tau_joint_damping
 
         d.ctrl[0:6] = np.clip(torque0, -max_total_torque, max_total_torque)
 

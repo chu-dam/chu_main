@@ -165,12 +165,14 @@ epsilon = 1e-5
 K_a_mat = np.diag([400.0, 400.0, 400.0])    # 병진 제어 대역폭: wn = 20 rad/s
 zeta_a_mat = np.diag([15.0, 15.0, 15.0])    # 사용자 설정 감쇠값
 
+
 K_o = 40.0                                # 회전 복원 토크 계수 (Lambda 우회)
 zeta_o = 14.0                             # 사용자 설정 감쇠값
 
 max_torque = 50.0
 tau_rate_limit = np.array([20.0, 20.0, 20.0, 15.0, 15.0, 10.0])
 
+C0_gain = np.array([2.0, 2.0, 2.0, 1.0, 1.0, 1.0])
 
 # =========================================================
 # 4. Runtime variables
@@ -277,8 +279,12 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
         # 3. 최종 Wrench 합산 및 토크 변환
         W_task = W_trans + W_ori
         
+        tau_joint_damping = -(np.diag(C0_gain) @ np.deg2rad(jvel))
+
         # raw_err 수식이 (real - desired) 이므로 - 부호를 유지하여 복원력을 생성합니다.
-        torque0 = - (J_6D.T @ W_task)
+        torque0 = ( - 0.0 * (J_6D.T @ W_task)
+                    + 10.0 * tau_joint_damping
+                )
         target_torque_raw = np.clip(torque0, -max_torque, max_torque)
 
         # Torque rate limit
@@ -325,6 +331,7 @@ with mujoco.viewer.launch_passive(m, d) as viewer:
         print(f"[ORI ERR] {ori_err0}")
         print(f"[ORI ERR DEG] {ori_err_deg:.3f}")
         print(f"[TAR TOR RAW] {target_torque_raw}")
+        print(f"[JOINT DAMP] {tau_joint_damping}")
         print(f"[TAR TOR] {target_torque}")
         print("--------------------------------------")
 
