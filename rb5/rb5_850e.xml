@@ -80,7 +80,7 @@
                   <joint name="wrist3" axis="0 1 0" range="-3.14 3.14"/>
                   <geom type="mesh" mesh="link6_mesh"/>
 
-                  <body name="tcp_frame" pos="0 -0.0967 0">
+                  <body name="tcp_frame" pos="0 -0.1012 0">
                     <site name="tcp" pos="0 0 0" size="0.008" rgba="1 0 0 1"/>
                   </body>
                 </body>

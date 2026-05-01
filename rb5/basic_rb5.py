@@ -1,460 +1,285 @@
 from time import time, sleep
+from copy import deepcopy
 import mujoco
 import mujoco.viewer
 import numpy as np
 
-from rbpodo import SystemVariable, CobotData
+from rbpodo import Cobot, SystemVariable, CobotData
 import rbpodo as rb
+import numpy as np
 
-
-# =========================================================
-# Robot connection
-# =========================================================
+######## torque servo
 try:
-    ROBOT_ADDRESS = "169.254.186.20"
+    ROBOT_ADDRESS = "169.254.186.20" 
 
     robot = rb.Cobot(ROBOT_ADDRESS)
     rc = rb.ResponseCollector()
-
+    
     robot_data = CobotData(ROBOT_ADDRESS)
     state = robot_data.request_data()
-
+    
     robot.set_operation_mode(rc, rb.OperationMode.Real)
     robot.set_speed_bar(rc, 0.5)
-
-    t1 = 0.01  # 이동시간
-    t2 = 0.05  # 유지시간
-
+    #robot.set_freedrive_mode(rc, on=False)
+    t1 = 0.01 #이동시간
+    t2 = 0.05 #유지시간
+    
 except Exception as e:
     print(f"No Robot Connection ..! {e}")
-    raise SystemExit
+    pass
+########
 
-
-# =========================================================
-# Utility functions
-# =========================================================
 def rpy_to_rotmat(roll, pitch, yaw):
     roll = np.deg2rad(roll)
     pitch = np.deg2rad(pitch)
     yaw = np.deg2rad(yaw)
-
+    
+    # ZYX (yaw-pitch-roll) 순서
     cr = np.cos(roll)
     sr = np.sin(roll)
     cp = np.cos(pitch)
     sp = np.sin(pitch)
     cy = np.cos(yaw)
     sy = np.sin(yaw)
-
+    
     Rz = np.array([
         [cy, -sy, 0],
         [sy,  cy, 0],
-        [0,    0, 1],
+        [ 0,   0, 1]
     ])
-
     Ry = np.array([
         [cp, 0, sp],
         [0,  1, 0],
-        [-sp, 0, cp],
+        [-sp, 0, cp]
     ])
-
     Rx = np.array([
         [1, 0,   0],
         [0, cr, -sr],
-        [0, sr,  cr],
+        [0, sr,  cr]
     ])
-
+    # R = Rz @ Ry @ Rx
     return Rz @ Ry @ Rx
-
 
 def rb_get_joint_state():
     jpos = []
     jvel = []
-
     for i in range(6):
         var_pos = getattr(SystemVariable, f"SD_J{i}_ANG")
         var_vel = getattr(SystemVariable, f"SD_J{i}_VEL")
-
         _, pos = robot.get_system_variable(rc, var_pos)
         _, vel = robot.get_system_variable(rc, var_vel)
-
         jpos.append(pos)
         jvel.append(vel)
+    return np.array(jpos), np.array(jvel)
 
-    return np.array(jpos, dtype=np.float64), np.array(jvel, dtype=np.float64)
-
-
-def rb_get_tcp_pose(current_state):
-    """
-    RB 컨트롤러에서 실제 TCP pose를 읽음.
-    위치 단위: m
-    자세 단위: deg, rotation matrix
-    """
-    if hasattr(current_state.sdata, "tcp"):
-        tcp_info = np.array(current_state.sdata.tcp, dtype=np.float64)
-    elif hasattr(current_state.sdata, "tcp_pos"):
-        tcp_info = np.array(current_state.sdata.tcp_pos, dtype=np.float64)
-    elif hasattr(current_state.sdata, "cur_pos"):
-        tcp_info = np.array(current_state.sdata.cur_pos, dtype=np.float64)
+def rb_get_joint_position():
+    jpos = []
+    if state is None:
+        print("Failed to get robot state.")
     else:
-        raise RuntimeError("TCP pose field를 찾지 못했습니다.")
+        jpos = state.sdata.jnt_ang  # 조인트 위치 (deg)
+    return np.array(jpos)
 
-    tcp_pos_m = tcp_info[0:3] * 0.001
-    tcp_rpy = tcp_info[3:6]
-    tcp_R = rpy_to_rotmat(*tcp_rpy)
+def rb_get_tcp_pose():
+    tcp_pos = []
+    tcp_rpy = []
+    _, tcp_info = robot.get_tcp_info(rc)
+    tcp_pos = np.array(tcp_info[0:3]) / 1000.0  # mm -> m
+    tcp_rpy = np.array(tcp_info[3:6])           # deg
 
-    return tcp_pos_m, tcp_R, tcp_rpy
+    return np.array(tcp_pos), np.array(tcp_rpy)
 
+# --------- desired ---------
+desired_xpos_tcp = np.array([0.0, -0.5, 0.5])
+desired_rpy = np.array([90.0, 0.0, 0.0])  # roll, pitch, yaw 입력
+# -----------------------------
 
-def request_valid_state(robot_data, retry=30, wait_sec=0.05):
-    for _ in range(retry):
-        state = robot_data.request_data()
-        if state is not None:
-            return state
-        sleep(wait_sec)
-    return None
-
-def wait_move_finished(robot, rc, start_timeout=1.0):
-    try:
-        ret = robot.wait_for_move_started(rc, start_timeout)
-
-        if ret.type() == rb.ReturnType.Success:
-            robot.wait_for_move_finished(rc)
-        else:
-            print("[WARN] move_j 시작 확인 timeout. 3초 대기 후 진행합니다.")
-            sleep(3.0)
-
-        rc.error().throw_if_not_empty()
-
-    except Exception as e:
-        print(f"[WARN] move_j 대기 중 예외 발생: {e}")
-        print("[WARN] 3초 대기 후 진행합니다.")
-        sleep(3.0)
-
-def move_j_to_initial_pose(robot, rc):
-    init_joint_deg = np.array([90.0, 0.0, -90.0, 0.0, -90.0, 0.0], dtype=np.float64)
-
-    movej_speed = 60.0
-    movej_acc = 80.0
-
-    print("\n[INIT] move_j로 초기 자세 이동 시작")
-    print(f"[INIT] target joint deg = {init_joint_deg}")
-
-    if hasattr(robot, "flush"):
-        robot.flush(rc)
-
-    robot.move_j(rc, init_joint_deg, movej_speed, movej_acc)
-    wait_move_finished(robot, rc)
-
-    sleep(0.3)
-    print("[INIT] move_j 완료")
-
-move_j_to_initial_pose(robot, rc)
-
-state = request_valid_state(robot_data)
-if state is None:
-    print("[ERROR] move_j 이후 로봇 상태를 읽지 못했습니다.")
-    raise SystemExit
-
-init_jpos = np.array(state.sdata.jnt_ang, dtype=np.float64)
-desired_xpos_tcp, R_desired, desired_rpy = rb_get_tcp_pose(state)
-
-
-# =========================================================
-# MuJoCo model
-# =========================================================
-model_path = "/home/chu/manipulator_control/rb5/scene_rb5.xml"
+model_path = "/home/chu/chu_main/rb5/scene_rb5.xml"
 m = mujoco.MjModel.from_xml_path(model_path)
 d = mujoco.MjData(m)
 
-
-# =========================================================
-# Initial robot state
-# =========================================================
+# initial robot pose
 try:
-    state = request_valid_state(robot_data)
+    jpos, jvel = rb_get_joint_state()
+    print(f"Initial jpos : {jpos} | jvel : {jvel}")
 
-    if state is None:
-        raise RuntimeError("초기 robot state를 읽지 못했습니다.")
-
-    jpos = np.array(state.sdata.jnt_ang, dtype=np.float64)
-
-    jvel = np.zeros(6, dtype=np.float64)
-
-    d.qpos[:] = np.deg2rad(jpos)
-    d.qvel[:] = np.deg2rad(jvel)
-    mujoco.mj_forward(m, d)
-
-
-    print(f"Initial jpos : {jpos}")
-    print(f"[TARGET POS FROM REAL TCP] {desired_xpos_tcp}")
-    print(f"[TARGET RPY FROM REAL TCP] {desired_rpy}")
-
-    sleep(1.0)
-
+    while (len(jpos)==0):
+        print("Waiting for robot init data..")
+        d.qpos[:] = np.deg2rad(jpos)
+        d.qvel[:] = 0 #TODO
+    sleep(3)
 except Exception as e:
     print(f"Can't get robot init data ..! {e}")
-    raise SystemExit
+    d.qpos[:] = [-0.5, -0.3, 1.3, 0.4, 1.57, 0.0]
+    d.qvel[:] = 0
+    sleep(3)
 
 
-# =========================================================
-# Buffers
-# =========================================================
 M = np.zeros((m.nv, m.nv), dtype=np.float64)
+G = np.zeros((m.nv), dtype=np.float64)
 
 jacp = np.zeros((3, m.nv), dtype=np.float64)
 jacr = np.zeros((3, m.nv), dtype=np.float64)
 
-tcp_site_id = m.site("tcp").id
+C0 = np.zeros((6,6))
 
+K_a = 100.0
+zeta_a = 2.0
 
-# =========================================================
-# Control gains
-# =========================================================
-K_a = 50.0
-zeta_a = 0.4
+K_o = 2.0
+zeta_o = 4.0
 
-K_o = 5.0
-zeta_o = 1.5
+varsigma = 0.5
 
+######################
+# Friction Coef
+Cfc = np.array([6.7569, 3.5644, 3.0893, 1.8396, 1.8396, 1.8396])
+Vfc = np.array([0.1515, 0.4009, 0.3245, 0.0388, 0.0388, 0.0388])
+friction_curve_coef = 8*1e-1
 
-# =========================================================
-# Dynamic compensation scale
-# =========================================================
-# 이전 0.3이 안정적이었으므로 다음 단계로 0.5 적용
-M_SCALE = 0.3
-
-# 코리올리/원심항은 우선 OFF
-C_SCALE = 0.5
-
-
-# =========================================================
-# Runtime variables
-# =========================================================
+######################
 prev_time = time()
 hz_window = []
-prev_jpos = None
+prev_jpos = None  
 
-print("\n[START] PD + inertia compensation + real TCP feedback")
-print(f"[INFO] M_SCALE = {M_SCALE}")
-print(f"[INFO] C_SCALE = {C_SCALE}")
-print("[INFO] TCP position/orientation error = REAL ROBOT TCP 기준")
-print("[INFO] Jacobian / Mass matrix = MuJoCo model 기준")
-print("[INFO] servo_t compensation=3 사용: 내부 자중보상 + 30% 마찰보상 유지")
-print("[INFO] 직접 입력토크 = PD torque + M(q)qdd_cmd + Coriolis/Centrifugal option")
-print("[INFO] 중력항 G는 직접 더하지 않음")
-
-
-# =========================================================
-# Control loop
-# =========================================================
 with mujoco.viewer.launch_passive(m, d) as viewer:
+    t0 = time()
     while viewer.is_running():
         state = robot_data.request_data()
-
-        if state is None:
-            continue
-
+        
         if state.sdata.op_stat_collision_occur:
             print("Robot in Collision")
             break
-
-        if state.sdata.op_stat_sos_flag == 4:
-            print(f"Command Input Error")
+        if state.sdata.op_stat_sos_flag==4:
+            print(f"Command Input Error | JVEL : {jvel}")
             break
-
+        
         now = time()
         loop_dt = now - prev_time
         prev_time = now
 
-        if loop_dt <= 0.0:
-            continue
-
-        loop_dt = max(loop_dt, 0.001)
-
-        # ---------------------------------------------------------
-        # Real robot joint state update
-        # ---------------------------------------------------------
-        try:
-            jpos = np.array(state.sdata.jnt_ang, dtype=np.float64)
-
-            jvel = np.zeros(6, dtype=np.float64)
-            if prev_jpos is not None:
-                jvel = (jpos - prev_jpos) / loop_dt
-
-            prev_jpos = jpos.copy()
-
-            d.qpos[:] = np.deg2rad(jpos)
-            d.qvel[:] = np.deg2rad(jvel)
-
-        except Exception as e:
-            print(f"real joint data update failed..! {e}")
-            continue
-
-        # ---------------------------------------------------------
-        # Real robot TCP pose update
-        # ---------------------------------------------------------
-        try:
-            real_tcp_pos, real_tcp_R, real_tcp_rpy = rb_get_tcp_pose(state)
-        except Exception as e:
-            print(f"real TCP data update failed..! {e}")
-            continue
-
-        # ---------------------------------------------------------
-        # Forward kinematics / dynamics update in MuJoCo
-        # ---------------------------------------------------------
-        mujoco.mj_forward(m, d)
+        mujoco.mj_step(m, d)
         mujoco.mj_fullM(m, M, d.qM)
 
-        mujoco_tcp_pos = d.site("tcp").xpos.copy()
-
-        # ---------------------------------------------------------
-        # Coriolis / centrifugal term from MuJoCo bias force
-        # qfrc_bias contains gravity + Coriolis/centrifugal.
-        # Therefore, subtract static bias at qvel=0 to remove gravity.
-        # ---------------------------------------------------------
-        bias_with_vel = d.qfrc_bias.copy()
-
-        qvel_backup = d.qvel.copy()
-
-        d.qvel[:] = 0.0
+        try:
+        ## real data update ##
+            jpos = rb_get_joint_position()
+            jvel = np.zeros(6)
+            if prev_jpos is not None:
+                jvel = (jpos - prev_jpos) / loop_dt
+                # print(f"jvel calc :: {jvel} = {jpos}-{prev_jpos}/{loop_dt}")
+            prev_jpos = jpos
+            
+            # print(f"JP : {jpos} | JV : {jvel}")
+            
+            d.qpos[:] = np.deg2rad(jpos)
+            d.qvel[:] = np.deg2rad(jvel)
+        except Exception as e:
+            print(f"real data update failed..! {e}")
+        ######################
+        
+        qvel_backup = deepcopy(d.qvel)
+        d.qvel[:] = 0
         mujoco.mj_forward(m, d)
-        bias_static = d.qfrc_bias.copy()
+        mujoco.mj_rne(m, d, 0, G) 
+        d.qvel[:] = qvel_backup[:]
+        mujoco.mj_forward(m, d)        
 
-        d.qvel[:] = qvel_backup
-        mujoco.mj_forward(m, d)
+        np.fill_diagonal(C0, varsigma * np.sqrt(np.sum(np.abs(M[0:6, 0:6]), axis=1)))
 
-        tau_coriolis = C_SCALE * (bias_with_vel[0:6] - bias_static[0:6])
-
-        # ---------------------------------------------------------
-        # Jacobian from MuJoCo
-        # ---------------------------------------------------------
+        tcp_site_id = m.site("tcp").id
         mujoco.mj_jacSite(m, d, jacp, jacr, tcp_site_id)
+        jacp0 = deepcopy(jacp[:, 0:6])
+        jacr0 = deepcopy(jacr[:, 0:6])
+        # print(f"jr : {jacr0}")    
 
-        jacp0 = jacp[:, 0:6].copy()
-        jacr0 = jacr[:, 0:6].copy()
+        # Position Error
+        # Position Error
+        tcp_pos, tcp_rpy = rb_get_tcp_pose()
+        xpos_err0 = tcp_pos - desired_xpos_tcp
 
-        # ---------------------------------------------------------
-        # Position error from REAL TCP
-        # ---------------------------------------------------------
-        xpos_cur = real_tcp_pos.copy()
-        xpos_err0 = real_tcp_pos - desired_xpos_tcp
-
-        # Linear velocity from MuJoCo Jacobian + real joint velocity
-        xpos_dot0 = jacp0 @ d.qvel[0:6]
-
-        # Linear spring-damper command
-        force0 = (K_a * xpos_err0) + (zeta_a * np.sqrt(K_a) * xpos_dot0)
-
-        # ---------------------------------------------------------
-        # Orientation error from REAL TCP
-        # ---------------------------------------------------------
-        R_current = real_tcp_R.copy()
-
+        # Orientation Error (RPY 입력 반영)
+        R_current = rpy_to_rotmat(*tcp_rpy)
+        # print(f"Ro : {R_current}")
+        
+        R_desired = rpy_to_rotmat(*desired_rpy)
+        # print(f"Rd : {R_desired}")
+        # R_desired = R_desired@R_desired
         ori_err0 = (
             np.cross(R_desired[:, 0], R_current[:, 0]) +
             np.cross(R_desired[:, 1], R_current[:, 1]) +
             np.cross(R_desired[:, 2], R_current[:, 2])
-        )
-
-        # Angular velocity from MuJoCo Jacobian + real joint velocity
+        ) # e  = (x X xd) + (y X yd) + (z X zd)
+        
+        # Angular Velocity
         w0 = jacr0 @ d.qvel[0:6]
+        # print(f"wo : {w0}")
 
-        # Orientation spring-damper command
+        # Orientation Force
         F_ori_0 = (K_o * ori_err0) + (zeta_o * np.sqrt(K_o) * w0)
 
-        # ---------------------------------------------------------
-        # Original PD torque
-        # ---------------------------------------------------------
-        tau_pd = - jacp0.T @ force0 - jacr0.T @ F_ori_0
+        # Linear Velocity
+        xpos_dot0 = jacp0 @ d.qvel[0:6]
 
-        # ---------------------------------------------------------
-        # Inertia compensation
-        # ---------------------------------------------------------
-        # force0 = K*xerr + D*xdot
-        # 복귀 방향 task-space acceleration-like command는 -force0
-        xdd_cmd = -force0
+        # Linear Force 
+        force0 = (K_a * xpos_err0) + (zeta_a * np.sqrt(K_a) * xpos_dot0)
 
-        # Task-space acceleration command -> joint acceleration command
-        qdd_cmd = np.linalg.pinv(jacp0) @ xdd_cmd
+        fric_scale = np.array([0.73, 1.0, 1.0, 0.8, 0.8, 0.8])
+        Tf = fric_scale * (Cfc * np.tanh(friction_curve_coef * jvel) + Vfc * jvel)
+        # print(f"Friction Torque : {Tf}")
+        
+        # Torque (Coli + Gravity + Damping + Orientation)
+        torque0 = (- 1 * C0 @ d.qvel[0:6] 
+                   - 1 * jacp0.T @ force0
+                   + 1 * G[0:6] 
+                   - 1 * jacr0.T @ F_ori_0
+                   + 1 * Tf[0:6])
+        # print(f"torque 0 : {torque0}")
+        
+        max_torque = 50
+        d.ctrl[0:6] = np.clip(torque0, -max_torque, max_torque)
+ 
+        if np.any(jvel > 70): # Joint Vel Limit
+            i = np.where(jvel > 70)[0]  # 튜플에서 실제 인덱스만 가져옴
 
-        # Joint-space inertia compensation
-        tau_inertia = M_SCALE * (M[0:6, 0:6] @ qdd_cmd)
-
-        # ---------------------------------------------------------
-        # Final torque
-        # ---------------------------------------------------------
-        torque0 = tau_pd + tau_inertia + tau_coriolis
-
-        max_torque = 50.0
-        target_torque = np.clip(torque0, -max_torque, max_torque)
-
-        d.ctrl[0:6] = target_torque
-
-        # ---------------------------------------------------------
-        # Joint velocity safety
-        # ---------------------------------------------------------
-        if np.any(np.abs(jvel) > 70):
-            idx = np.where(np.abs(jvel) > 70)[0]
-
-            if len(idx) > 0:
-                target_torque[idx] = 0.0
-                d.ctrl[idx] = 0.0
-
+            if len(i) > 0:
+                d.ctrl[i] = 0.0 * torque0[i]
                 print(torque0)
-                print(f"Joint Velocity is too fast ...! Joint{list(idx)} | Jvel : {jvel[idx]}")
+                print(f"Joint Velocity is too fast ...! Joint{list(i)} | Jvel : {jvel[i]}")
+                
+        # print(f"Taget torque : {d.ctrl[0:6]}")
+        
+        target_torque =  d.ctrl[0:6]
 
-        # ---------------------------------------------------------
-        # Hz measurement
-        # ---------------------------------------------------------
+         # Hz 측정 (1 / 주기)
         if loop_dt > 0:
             hz = 1.0 / loop_dt
             hz_window.append(hz)
-
-            if len(hz_window) > 30:
+            if len(hz_window) > 30:  # 최근 30프레임 평균
                 hz_window.pop(0)
-
-        # ---------------------------------------------------------
-        # Torque servo command
-        # ---------------------------------------------------------
+            
+            print(f"[move_servo_t] Hz = {hz:.2f} (avg={np.mean(hz_window):.2f})")
+            print(f"[TCP_DES] {desired_xpos_tcp}")
+            print(f"[TCP_CUR] {tcp_pos}")
+            print(f"[TCP_ERR] {xpos_err0} | norm = {np.linalg.norm(xpos_err0):.4f}")
+            print(f"[RPY_DES] {desired_rpy}")
+            print(f"[RPY_CUR] {tcp_rpy}")
+            print(f"[ORI_ERR] {ori_err0} | norm = {np.linalg.norm(ori_err0):.4f}")
+            print(f"[F_ORI] {F_ori_0}")
+            print(f"[C0 diag] {np.diag(C0)}")
+            print(f"[Target torque] {d.ctrl[0:6]}")
+            print("------------------------------------")
+       
+        # 토크 서보잉 입력
         try:
-            ret = robot.move_servo_t(rc, target_torque, t1, t2, compensation=3)
-            sleep(0.005)
-
+            target_torque =  d.ctrl[0:6]
+            ret = robot.move_servo_t(rc, target_torque, t1, t2, compensation=0)
+            # # comp 0 : u / 1 : u + g / 2 : u + f / 3 : u + g + f
+            sleep(0.005) # t2 = 0.05
             if not ret.is_success():
                 print(f"move_servo_t 실패 ", ret)
-
+                
         except Exception as e:
             print(f"T-servo Failed ..! {e}")
-
-        # ---------------------------------------------------------
-        # Logs
-        # ---------------------------------------------------------
-        err_norm = np.linalg.norm(xpos_err0)
-        vel_norm = np.linalg.norm(xpos_dot0)
-
-        R_err = R_desired.T @ R_current
-        cos_angle = (np.trace(R_err) - 1.0) / 2.0
-        cos_angle = np.clip(cos_angle, -1.0, 1.0)
-        ori_err_deg = np.rad2deg(np.arccos(cos_angle))
-
-        rpy_err = real_tcp_rpy - desired_rpy
-        rpy_err = (rpy_err + 180.0) % 360.0 - 180.0
-
-        print(f"[ERR NORM] {err_norm:.4f} | [VEL] {vel_norm:.4f} | [HZ] {np.mean(hz_window):.2f}")
-        print(f"[POS ERR REAL] {xpos_err0}")
-        print(f"[REAL TCP POS] {real_tcp_pos}")
-        print(f"[MUJOCO TCP POS] {mujoco_tcp_pos}")
-        print(f"[TCP POS DIFF real-mujoco] {real_tcp_pos - mujoco_tcp_pos}")
-        print(f"[F_POS] {force0}")
-        print(f"[TARGET RPY] {desired_rpy}")
-        print(f"[REAL RPY] {real_tcp_rpy}")
-        print(f"[RPY ERR DEG] {rpy_err}")
-        print(f"[ORI ERR] {ori_err0}")
-        print(f"[ORI ERR DEG] {ori_err_deg:.3f}")
-        print(f"[TAU_PD] {tau_pd}")
-        print(f"[TAU_INERTIA] {tau_inertia}")
-        print(f"[TAU_CORIOLIS] {tau_coriolis}")
-        print(f"[TAR TOR] {target_torque}")
-        print("--------------------------------------")
 
         viewer.sync()

@@ -3,302 +3,187 @@ from copy import deepcopy
 import mujoco
 import mujoco.viewer
 import numpy as np
+import glfw
 
 from rbpodo import Cobot, SystemVariable, CobotData
 import rbpodo as rb
-import numpy as np
 
-######## torque servo
+# =========================================================
+# 1. 로봇 및 환경 설정
+# =========================================================
+ROBOT_ADDRESS = "169.254.186.20" 
+MODEL_PATH = "/home/chu/chu_main/rb5/scene_rb5.xml"
+
 try:
-    ROBOT_ADDRESS = "169.254.186.20"
-
     robot = rb.Cobot(ROBOT_ADDRESS)
     rc = rb.ResponseCollector()
-    
     robot_data = CobotData(ROBOT_ADDRESS)
-    state = robot_data.request_data()
     
-    robot.set_operation_mode(rc, rb.OperationMode.Real)
+    robot.set_operation_mode(rc, rb.OperationMode.Real) 
     robot.set_speed_bar(rc, 0.5)
-    #robot.set_freedrive_mode(rc, on=False)
-    t1 = 0.01 #이동시간
-    t2 = 0.05 #유지시간
     
+    t1, t2 = 0.01, 0.05
+    print(f"[INFO] RB5 시스템 연결 성공 ({ROBOT_ADDRESS})")
 except Exception as e:
-    print(f"No Robot Connection ..! {e}")
-    pass
-########
+    print(f"[ERROR] 초기화 실패: {e}"); raise SystemExit
 
-def rpy_to_rotmat(roll, pitch, yaw):
-    roll = np.deg2rad(roll)
-    pitch = np.deg2rad(pitch)
-    yaw = np.deg2rad(yaw)
-    
-    # ZYX (yaw-pitch-roll) 순서
-    cr = np.cos(roll)
-    sr = np.sin(roll)
-    cp = np.cos(pitch)
-    sp = np.sin(pitch)
-    cy = np.cos(yaw)
-    sy = np.sin(yaw)
-    
-    Rz = np.array([
-        [cy, -sy, 0],
-        [sy,  cy, 0],
-        [ 0,   0, 1]
-    ])
-    Ry = np.array([
-        [cp, 0, sp],
-        [0,  1, 0],
-        [-sp, 0, cp]
-    ])
-    Rx = np.array([
-        [1, 0,   0],
-        [0, cr, -sr],
-        [0, sr,  cr]
-    ])
-    # R = Rz @ Ry @ Rx
-    return Rz @ Ry @ Rx
+# =========================================================
+# 2. 초기 자세 정렬 (Homing)
+# =========================================================
+home_joint_pose = [90.0, 0.0, -90.0, 0.0, -90.0, 0.0]
+print(f"[Step 1] Home 자세 정렬 시작: {home_joint_pose}")
+robot.move_j(rc, home_joint_pose, 30.0, 60.0)
+robot.wait_for_move_finished(rc)
+sleep(1.0)
 
-def rb_get_joint_state():
-    jpos = []
-    jvel = []
-    for i in range(6):
-        var_pos = getattr(SystemVariable, f"SD_J{i}_ANG")
-        var_vel = getattr(SystemVariable, f"SD_J{i}_VEL")
-        _, pos = robot.get_system_variable(rc, var_pos)
-        _, vel = robot.get_system_variable(rc, var_vel)
-        jpos.append(pos)
-        jvel.append(vel)
-    return np.array(jpos), np.array(jvel)
-
-def rb_get_joint_position():
-    jpos = []
-    if state is None:
-        print("Failed to get robot state.")
-    else:
-        jpos = state.sdata.jnt_ang  # 조인트 위치 (deg)
-    return np.array(jpos)
-
-# --------- desired ---------
-desired_xpos_tcp = np.array([0.0, -0.45, 0.35])
-desired_rpy = np.array([90.0, 0.0, 0.0])  # roll, pitch, yaw 입력
-# -----------------------------
-
-model_path = "/home/chu/manipulator_control/rb5/scene_rb5.xml"
-m = mujoco.MjModel.from_xml_path(model_path)
+# =========================================================
+# 3. 제어 파라미터 및 유틸리티
+# =========================================================
+m = mujoco.MjModel.from_xml_path(MODEL_PATH)
 d = mujoco.MjData(m)
 
-# initial robot pose
-try:
-    jpos, jvel = rb_get_joint_state()
-    print(f"Initial jpos : {jpos} | jvel : {jvel}")
+jpos_init = np.array(robot_data.request_data().sdata.jnt_ang)
+d.qpos[:] = np.deg2rad(jpos_init)
+mujoco.mj_forward(m, d)
 
-    while (len(jpos)==0):
-        print("Waiting for robot init data..")
-        d.qpos[:] = np.deg2rad(jpos)
-        d.qvel[:] = 0 #TODO
-    sleep(3)
-except Exception as e:
-    print(f"Can't get robot init data ..! {e}")
-    d.qpos[:] = [-0.5, -0.3, 1.3, 0.4, 1.57, 0.0]
-    d.qvel[:] = 0
-    sleep(3)
+target_home = deepcopy(d.site("tcp").xpos)
+target_toggle = np.array([-0.11, -0.402, 0.35]) 
 
+desired_xpos_tcp = deepcopy(target_home)
+desired_rpy = np.array([90.0, 0.0, 0.0])
+is_home_target = True
 
-M = np.zeros((m.nv, m.nv), dtype=np.float64)
-G = np.zeros((m.nv), dtype=np.float64)
+# --- 강의 자료 기반 제어 파라미터 ---
+K_a = 100.0        # k: spring stiffness
+K_o = 2.0
+zeta_a = 1.0       # zeta: damping factor
+zeta_o = 2.0
 
-jacp = np.zeros((3, m.nv), dtype=np.float64)
-jacr = np.zeros((3, m.nv), dtype=np.float64)
+# Synergistic Damping 계수
+varsigma = 0.5     # 자료의 varsigma (0 <= varsigma < 1)
+alpha = 0.1        # LPF 필터 계수
 
-C0 = np.zeros((6,6))
+# 마찰 보상 파라미터
+Cfc = np.array([6.7569, 3.5644, 3.0893, 1.8396, 1.8396, 1.8396])
+Vfc = np.array([0.1515, 0.4009, 0.3245, 0.0388, 0.0388, 0.0388])
+friction_curve_coef = 0.5  # tanh 기울기
+deadband_vel = 0.1
 
-K_a = 100.0
-zeta_a = 1.0
+def mat_to_rpy(R):
+    sy = np.sqrt(R[0,0]**2 + R[1,0]**2)
+    if sy > 1e-6:
+        x, y, z = np.arctan2(R[2,1], R[2,2]), np.arctan2(-R[2,0], sy), np.arctan2(R[1,0], R[0,0])
+    else:
+        x, y, z = np.arctan2(-R[1,2], R[1,1]), np.arctan2(-R[2,0], sy), 0
+    return np.rad2deg(np.array([x, y, z]))
 
-K_o = 4.0
-zeta_o = 1.0
+def rpy_to_rotmat(roll, pitch, yaw):
+    r, p, y = np.deg2rad([roll, pitch, yaw])
+    cr, sr, cp, sp, cy, sy = np.cos(r), np.sin(r), np.cos(p), np.sin(p), np.cos(y), np.sin(y)
+    Rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
+    Ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
+    Rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+    return Rz @ Ry @ Rx
 
-######################
-# Friction Coef
-Cfc = np.array([10.5, 6.5, 6.5, 0.7, 1.0, 1.5]) # coulomb friction coef
-Vfc = np.array([10.5, 6.5, 6.5, 0.7, 1.0, 1.0]) # viscous friction coef
-friction_curve_coef = 8*1e-1
+def key_callback(key):
+    global desired_xpos_tcp, is_home_target
+    if key == glfw.KEY_S:
+        is_home_target = not is_home_target
+        desired_xpos_tcp = target_home if is_home_target else target_toggle
 
-######################
-prev_time = time()
-hz_window = []
-prev_jpos = None  
+# =========================================================
+# 4. 고정 주기(200Hz) 메인 제어 루프
+# =========================================================
+control_hz = 200
+dt = 1.0 / control_hz
+next_loop_time = time()
 
-with mujoco.viewer.launch_passive(m, d) as viewer:
-    t0 = time()
+prev_jpos = None
+filtered_jvel = np.zeros(6)
+M, G = np.zeros((m.nv, m.nv)), np.zeros(m.nv)
+jacp, jacr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
+C0 = np.zeros((6, 6))
+loop_cnt = 0
+
+with mujoco.viewer.launch_passive(m, d, key_callback=key_callback) as viewer:
+    print(f"\n[INFO] Synergistic Damping 제어 시작")
+    
     while viewer.is_running():
+        start_time = time()
         state = robot_data.request_data()
         
-        if state.sdata.op_stat_collision_occur:
-            print("Robot in Collision")
-            break
-        if state.sdata.op_stat_sos_flag==4:
-            print(f"Command Input Error | JVEL : {jvel}")
-            break
-        
-        now = time()
-        loop_dt = now - prev_time
-        prev_time = now
+        # 1. 상태 업데이트 및 필터링
+        try:
+            jpos = np.array(state.sdata.jnt_ang)
+            if prev_jpos is not None:
+                raw_jvel = (jpos - prev_jpos) / dt 
+                filtered_jvel = alpha * raw_jvel + (1 - alpha) * filtered_jvel
+            prev_jpos = jpos
+            d.qpos[:], d.qvel[:] = np.deg2rad(jpos), np.deg2rad(filtered_jvel)
+        except Exception: continue
 
+        # 2. 동역학 연산
         mujoco.mj_step(m, d)
         mujoco.mj_fullM(m, M, d.qM)
-
-        try:
-        ## real data update ##
-            jpos = rb_get_joint_position()
-            jvel = np.zeros(6)
-            if prev_jpos is not None:
-                jvel = (jpos - prev_jpos) / loop_dt
-                # print(f"jvel calc :: {jvel} = {jpos}-{prev_jpos}/{loop_dt}")
-            prev_jpos = jpos
-            
-            # print(f"JP : {jpos} | JV : {jvel}")
-            
-            d.qpos[:] = np.deg2rad(jpos)
-            d.qvel[:] = np.deg2rad(jvel)
-        except Exception as e:
-            print(f"real data update failed..! {e}")
-        ######################
-        
-        qvel_backup = deepcopy(d.qvel)
+        qvel_bk = deepcopy(d.qvel)
         d.qvel[:] = 0
         mujoco.mj_forward(m, d)
-        mujoco.mj_rne(m, d, 0, G) 
-        d.qvel[:] = qvel_backup[:]
-        mujoco.mj_forward(m, d)        
+        mujoco.mj_rne(m, d, 0, G) # Gravity compensation g(q)
+        d.qvel[:] = qvel_bk
+        tcp_id = m.site("tcp").id
+        mujoco.mj_jacSite(m, d, jacp, jacr, tcp_id)
 
-        np.fill_diagonal(C0, np.sum(np.abs(M[0:6, 0:6]), axis=1))
-
-        tcp_site_id = m.site("tcp").id
-        mujoco.mj_jacSite(m, d, jacp, jacr, tcp_site_id)
-        jacp0 = deepcopy(jacp[:, 0:6])
-        jacr0 = deepcopy(jacr[:, 0:6])
-        # print(f"jr : {jacr0}")
-
-        # Position Error
-        xpos_err0 = d.site("tcp").xpos - desired_xpos_tcp
-
-        # Orientation Error (RPY 입력 반영)
-        R_current = d.site(tcp_site_id).xmat.reshape(3, 3)
-        # print(f"Ro : {R_current}")
-        
-        R_desired = rpy_to_rotmat(*desired_rpy)
-        # print(f"Rd : {R_desired}")
-        # R_desired = R_desired@R_desired
-        ori_err0 = (
-            np.cross(R_desired[:, 0], R_current[:, 0]) +
-            np.cross(R_desired[:, 1], R_current[:, 1]) +
-            np.cross(R_desired[:, 2], R_current[:, 2])
-        ) # e  = (x X xd) + (y X yd) + (z X zd)
-        
-        # Angular Velocity
-        w0 = jacr0 @ d.qvel[0:6]
-        # print(f"wo : {w0}")
-
-        # Orientation Force
-        F_ori_0 = (K_o * ori_err0) + (zeta_o * np.sqrt(K_o) * w0)
-
-        # Linear Velocity
-        xpos_dot0 = jacp0 @ d.qvel[0:6]
-
-        # Linear Force 
-        force0 = (K_a * xpos_err0) + (zeta_a * np.sqrt(K_a) * xpos_dot0)
-        
-
-        # Friction Comp.
-        # TODO 
-        
-        Tf = np.zeros((6))
-        mujoco.mj_forward(m, d)
+        # 3. 강의 자료 기반 Synergistic Damping (C0) 계산
+        # c_i = varsigma * sqrt(sum(|H_Mij|)) 수식 적용
         for i in range(6):
-            Tf[i] = (Cfc[i] * np.tanh(friction_curve_coef*d.qvel[i]) + Vfc[i] * d.qvel[i])        
-        # print(f"Friction Torque : {Tf}")
-        
-        # Torque (Coli + Gravity + Damping + Orientation)
-        torque0 = (- 0 * C0 @ d.qvel[0:6] 
-                   - 1 * jacp0.T @ force0
-                   + 0 * G[0:6] 
-                   - 1 * jacr0.T @ F_ori_0
-                   + 0 * Tf[0:6])
-        # print(f"torque 0 : {torque0}")
-        
-        max_torque = 50
-        d.ctrl[0:6] = np.clip(torque0, -max_torque, max_torque)
- 
-        if np.any(jvel > 70): # Joint Vel Limit
-            i = np.where(jvel > 70)[0]  # 튜플에서 실제 인덱스만 가져옴
+            row_abs_sum = np.sum(np.abs(M[i, 0:6]))
+            C0[i, i] = varsigma * np.sqrt(row_abs_sum)
 
-            if len(i) > 0:
-                d.ctrl[i] = 0.0 * torque0[i]
-                print(torque0)
-                print(f"Joint Velocity is too fast ...! Joint{list(i)} | Jvel : {jvel[i]}")
-                
-        # print(f"Taget torque : {d.ctrl[0:6]}")
-        
-        target_torque =  d.ctrl[0:6]
+        # 4. 태스크 공간 제어력 계산
+        x_curr = d.site("tcp").xpos
+        x_err = x_curr - desired_xpos_tcp
+        F_lin = (K_a * x_err) + (zeta_a * np.sqrt(K_a) * (jacp[:,:6] @ d.qvel[:6]))
 
-         # Hz 측정 (1 / 주기)
-        if loop_dt > 0:
-            hz = 1.0 / loop_dt
-            hz_window.append(hz)
-            if len(hz_window) > 30:  # 최근 30프레임 평균
-                hz_window.pop(0)
-            # print(f"[move_servo_t] Hz = {hz:.2f} (avg={np.mean(hz_window):.2f}) |\nTaget torque : {d.ctrl[0:6]}")
-       
-        # 토크 서보잉 입력
-        try:
-            target_torque =  d.ctrl[0:6]
-            ret = robot.move_servo_t(rc, target_torque, t1, t2, compensation=3)
-            # # comp 0 : u / 1 : u + g / 2 : u + f / 3 : u + g + f
-            sleep(0.005) # t2 = 0.05
-            if not ret.is_success():
-                print(f"move_servo_t 실패 ", ret)
-                
-        except Exception as e:
-            print(f"T-servo Failed ..! {e}")
+        R_curr = d.site(tcp_id).xmat.reshape(3, 3)
+        R_des = rpy_to_rotmat(*desired_rpy)
+        ori_err = (np.cross(R_des[:, 0], R_curr[:, 0]) +
+                   np.cross(R_des[:, 1], R_curr[:, 1]) +
+                   np.cross(R_des[:, 2], R_curr[:, 2]))
+        F_ori = (K_o * ori_err) + (zeta_o * np.sqrt(K_o) * (jacr[:,:6] @ d.qvel[:6]))
+
+        # 5. 마찰 보상 계산
+        Tf = np.zeros(6)
+        for i in range(6):
+            v_deg = filtered_jvel[i]
+            if abs(v_deg) > deadband_vel:
+                Tf[i] = (Cfc[i] * np.tanh(friction_curve_coef * v_deg) + Vfc[i] * v_deg)
+
+        # 6. 최종 토크 합산 (강의 자료 제어 루프 구조 유지)[cite: 1]
+        # u = -C0*q_dot - J^T(k*dp + zeta*sqrt(k)*p_dot) + g(q)[cite: 1]
+        torque0 = (- 1 * C0 @ d.qvel[0:6] 
+                   - 1 * jacp[:, 0:6].T @ F_lin 
+                   + 1 * G[0:6] 
+                   - 0 * jacr[:, 0:6].T @ F_ori 
+                   + 1 * Tf[0:6])
+
+        # 7. 토크 전송 및 모니터링
+        d.ctrl[:6] = np.clip(torque0, -50.0, 50.0)
+        if np.any(np.abs(filtered_jvel) > 70): d.ctrl[:6] = 0.0
+        
+        robot.move_servo_t(rc, d.ctrl[:6], t1, t2, compensation=0)
+
+        loop_cnt += 1
+        if loop_cnt % 20 == 0:
+            print("\033[H\033[J") 
+            print(f"{'--- RB5 Synergistic Control Monitoring ---':^50}")
+            print(f"Pos  Error: {np.linalg.norm(x_err):.4f} m")
+            print(f"C0 Diagonal: {np.diag(C0).round(2)}")
+            print(f"Loop Freq : {1.0/(time()-start_time + 1e-9):.1f} Hz")
+            print("=" * 50)
+
+        next_loop_time += dt
+        sleep_time = next_loop_time - time()
+        if sleep_time > 0: sleep(sleep_time)
+        else: next_loop_time = time() 
 
         viewer.sync()
-
-
-
-
-
-
-'''
-from rbpodo import Cobot
-import rbpodo as rb
-import numpy as np
-import time
-
-ROBOT_ADDRESS = "169.254.186.10"
-
-robot = rb.Cobot(ROBOT_ADDRESS)
-rc = rb.ResponseCollector()
-
-robot.set_operation_mode(rc, rb.OperationMode.Real)
-robot.set_speed_bar(rc, 1.0)
-
-t1 = 0.01 #이동시간
-t2 = 0.1 #유지시간
-compensation = 3   # gravity+friction
-
-repeat_count = 20  # 반복 횟수
-
-for i in range(repeat_count):
-    for val in [+10, -10, 0]:  # +1 → -1 → 0 반복
-        target_torque = np.zeros(6)
-        target_torque[5] = val  # 6번 관절만 토크 부여
-        ret = robot.move_servo_t(rc, target_torque, t1, t2, compensation)
-        if not ret.is_success():
-            print(f"move_servo_t 실패 (joint 5, val {val}):", ret)
-            break
-        time.sleep(5)
-
-'''
