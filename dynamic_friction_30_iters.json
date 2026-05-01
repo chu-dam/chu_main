@@ -1,0 +1,428 @@
+{
+    "joint_0": {
+        "config": {
+            "start": 0.0,
+            "end": 180.0,
+            "speed": 30.0,
+            "accel": 60.0
+        },
+        "average_friction": 1.4702,
+        "measurements": [
+            {
+                "iteration": 1,
+                "tau_plus": 1.4837,
+                "tau_minus": -1.4355,
+                "friction": 1.4596
+            },
+            {
+                "iteration": 2,
+                "tau_plus": 1.5645,
+                "tau_minus": -1.2944,
+                "friction": 1.4295
+            },
+            {
+                "iteration": 3,
+                "tau_plus": 1.5282,
+                "tau_minus": -1.2782,
+                "friction": 1.4032
+            },
+            {
+                "iteration": 4,
+                "tau_plus": 1.5989,
+                "tau_minus": -1.5833,
+                "friction": 1.5911
+            },
+            {
+                "iteration": 5,
+                "tau_plus": 1.3223,
+                "tau_minus": -1.4834,
+                "friction": 1.4028
+            },
+            {
+                "iteration": 6,
+                "tau_plus": 1.5665,
+                "tau_minus": -1.5448,
+                "friction": 1.5556
+            },
+            {
+                "iteration": 7,
+                "tau_plus": 1.3938,
+                "tau_minus": -1.558,
+                "friction": 1.4759
+            },
+            {
+                "iteration": 8,
+                "tau_plus": 1.592,
+                "tau_minus": -1.5777,
+                "friction": 1.5849
+            },
+            {
+                "iteration": 9,
+                "tau_plus": 1.4514,
+                "tau_minus": -1.3639,
+                "friction": 1.4077
+            },
+            {
+                "iteration": 10,
+                "tau_plus": 1.5185,
+                "tau_minus": -1.2647,
+                "friction": 1.3916
+            }
+        ]
+    },
+    "joint_1": {
+        "config": {
+            "start": -20.0,
+            "end": 90.0,
+            "speed": 30.0,
+            "accel": 60.0
+        },
+        "average_friction": 0.9724,
+        "measurements": [
+            {
+                "iteration": 1,
+                "tau_plus": 9.1068,
+                "tau_minus": 7.1242,
+                "friction": 0.9913
+            },
+            {
+                "iteration": 2,
+                "tau_plus": 9.0807,
+                "tau_minus": 7.0658,
+                "friction": 1.0075
+            },
+            {
+                "iteration": 3,
+                "tau_plus": 9.1426,
+                "tau_minus": 7.1738,
+                "friction": 0.9844
+            },
+            {
+                "iteration": 4,
+                "tau_plus": 9.0713,
+                "tau_minus": 7.0923,
+                "friction": 0.9895
+            },
+            {
+                "iteration": 5,
+                "tau_plus": 9.0621,
+                "tau_minus": 7.1147,
+                "friction": 0.9737
+            },
+            {
+                "iteration": 6,
+                "tau_plus": 9.0465,
+                "tau_minus": 7.2125,
+                "friction": 0.917
+            },
+            {
+                "iteration": 7,
+                "tau_plus": 9.0403,
+                "tau_minus": 7.159,
+                "friction": 0.9406
+            },
+            {
+                "iteration": 8,
+                "tau_plus": 9.1609,
+                "tau_minus": 7.163,
+                "friction": 0.9989
+            },
+            {
+                "iteration": 9,
+                "tau_plus": 9.0037,
+                "tau_minus": 7.0538,
+                "friction": 0.9749
+            },
+            {
+                "iteration": 10,
+                "tau_plus": 9.0126,
+                "tau_minus": 7.1207,
+                "friction": 0.946
+            }
+        ]
+    },
+    "joint_2": {
+        "config": {
+            "start": -90.0,
+            "end": 90.0,
+            "speed": 30.0,
+            "accel": 60.0
+        },
+        "average_friction": 1.2913,
+        "measurements": [
+            {
+                "iteration": 1,
+                "tau_plus": 0.8988,
+                "tau_minus": -1.735,
+                "friction": 1.3169
+            },
+            {
+                "iteration": 2,
+                "tau_plus": 0.8328,
+                "tau_minus": -1.7155,
+                "friction": 1.2741
+            },
+            {
+                "iteration": 3,
+                "tau_plus": 0.9665,
+                "tau_minus": -1.6834,
+                "friction": 1.3249
+            },
+            {
+                "iteration": 4,
+                "tau_plus": 1.0371,
+                "tau_minus": -1.709,
+                "friction": 1.3731
+            },
+            {
+                "iteration": 5,
+                "tau_plus": 0.8216,
+                "tau_minus": -1.6825,
+                "friction": 1.252
+            },
+            {
+                "iteration": 6,
+                "tau_plus": 0.9055,
+                "tau_minus": -1.5793,
+                "friction": 1.2424
+            },
+            {
+                "iteration": 7,
+                "tau_plus": 0.9906,
+                "tau_minus": -1.5159,
+                "friction": 1.2532
+            },
+            {
+                "iteration": 8,
+                "tau_plus": 1.1166,
+                "tau_minus": -1.7109,
+                "friction": 1.4137
+            },
+            {
+                "iteration": 9,
+                "tau_plus": 0.8887,
+                "tau_minus": -1.5956,
+                "friction": 1.2422
+            },
+            {
+                "iteration": 10,
+                "tau_plus": 0.9686,
+                "tau_minus": -1.4721,
+                "friction": 1.2203
+            }
+        ]
+    },
+    "joint_3": {
+        "config": {
+            "start": -90.0,
+            "end": 90.0,
+            "speed": 30.0,
+            "accel": 60.0
+        },
+        "average_friction": 0.3386,
+        "measurements": [
+            {
+                "iteration": 1,
+                "tau_plus": -0.9427,
+                "tau_minus": -1.6483,
+                "friction": 0.3528
+            },
+            {
+                "iteration": 2,
+                "tau_plus": -0.9584,
+                "tau_minus": -1.6225,
+                "friction": 0.332
+            },
+            {
+                "iteration": 3,
+                "tau_plus": -0.935,
+                "tau_minus": -1.6342,
+                "friction": 0.3496
+            },
+            {
+                "iteration": 4,
+                "tau_plus": -0.9646,
+                "tau_minus": -1.6176,
+                "friction": 0.3265
+            },
+            {
+                "iteration": 5,
+                "tau_plus": -0.9475,
+                "tau_minus": -1.6242,
+                "friction": 0.3383
+            },
+            {
+                "iteration": 6,
+                "tau_plus": -0.967,
+                "tau_minus": -1.6435,
+                "friction": 0.3383
+            },
+            {
+                "iteration": 7,
+                "tau_plus": -0.9486,
+                "tau_minus": -1.6052,
+                "friction": 0.3283
+            },
+            {
+                "iteration": 8,
+                "tau_plus": -0.9378,
+                "tau_minus": -1.6496,
+                "friction": 0.3559
+            },
+            {
+                "iteration": 9,
+                "tau_plus": -0.9603,
+                "tau_minus": -1.5993,
+                "friction": 0.3195
+            },
+            {
+                "iteration": 10,
+                "tau_plus": -0.9532,
+                "tau_minus": -1.6417,
+                "friction": 0.3443
+            }
+        ]
+    },
+    "joint_4": {
+        "config": {
+            "start": -135.0,
+            "end": -45.0,
+            "speed": 30.0,
+            "accel": 60.0
+        },
+        "average_friction": 0.3122,
+        "measurements": [
+            {
+                "iteration": 1,
+                "tau_plus": 0.2745,
+                "tau_minus": -0.3088,
+                "friction": 0.2917
+            },
+            {
+                "iteration": 2,
+                "tau_plus": 0.3385,
+                "tau_minus": -0.2995,
+                "friction": 0.319
+            },
+            {
+                "iteration": 3,
+                "tau_plus": 0.3353,
+                "tau_minus": -0.3145,
+                "friction": 0.3249
+            },
+            {
+                "iteration": 4,
+                "tau_plus": 0.3407,
+                "tau_minus": -0.3167,
+                "friction": 0.3287
+            },
+            {
+                "iteration": 5,
+                "tau_plus": 0.2666,
+                "tau_minus": -0.3203,
+                "friction": 0.2934
+            },
+            {
+                "iteration": 6,
+                "tau_plus": 0.2729,
+                "tau_minus": -0.3033,
+                "friction": 0.2881
+            },
+            {
+                "iteration": 7,
+                "tau_plus": 0.322,
+                "tau_minus": -0.3008,
+                "friction": 0.3114
+            },
+            {
+                "iteration": 8,
+                "tau_plus": 0.3413,
+                "tau_minus": -0.301,
+                "friction": 0.3212
+            },
+            {
+                "iteration": 9,
+                "tau_plus": 0.345,
+                "tau_minus": -0.3075,
+                "friction": 0.3263
+            },
+            {
+                "iteration": 10,
+                "tau_plus": 0.3411,
+                "tau_minus": -0.2932,
+                "friction": 0.3172
+            }
+        ]
+    },
+    "joint_5": {
+        "config": {
+            "start": -90.0,
+            "end": 90.0,
+            "speed": 30.0,
+            "accel": 60.0
+        },
+        "average_friction": 0.3442,
+        "measurements": [
+            {
+                "iteration": 1,
+                "tau_plus": 0.3555,
+                "tau_minus": -0.3357,
+                "friction": 0.3456
+            },
+            {
+                "iteration": 2,
+                "tau_plus": 0.3212,
+                "tau_minus": -0.3513,
+                "friction": 0.3363
+            },
+            {
+                "iteration": 3,
+                "tau_plus": 0.3615,
+                "tau_minus": -0.3361,
+                "friction": 0.3488
+            },
+            {
+                "iteration": 4,
+                "tau_plus": 0.3396,
+                "tau_minus": -0.3565,
+                "friction": 0.348
+            },
+            {
+                "iteration": 5,
+                "tau_plus": 0.3394,
+                "tau_minus": -0.3407,
+                "friction": 0.34
+            },
+            {
+                "iteration": 6,
+                "tau_plus": 0.3564,
+                "tau_minus": -0.3207,
+                "friction": 0.3386
+            },
+            {
+                "iteration": 7,
+                "tau_plus": 0.3549,
+                "tau_minus": -0.3284,
+                "friction": 0.3417
+            },
+            {
+                "iteration": 8,
+                "tau_plus": 0.3386,
+                "tau_minus": -0.3667,
+                "friction": 0.3527
+            },
+            {
+                "iteration": 9,
+                "tau_plus": 0.331,
+                "tau_minus": -0.3484,
+                "friction": 0.3397
+            },
+            {
+                "iteration": 10,
+                "tau_plus": 0.3633,
+                "tau_minus": -0.3372,
+                "friction": 0.3502
+            }
+        ]
+    }
+}
