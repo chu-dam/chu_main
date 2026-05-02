@@ -89,10 +89,62 @@ def rb_get_tcp_pose():
 
     return np.array(tcp_pos), np.array(tcp_rpy)
 
-# --------- desired ---------
-desired_xpos_tcp = np.array([0.0, -0.5, 0.5])
-desired_rpy = np.array([90.0, 0.0, 0.0])  # roll, pitch, yaw 입력
-# -----------------------------
+def rb_move_j_and_wait(joint_deg, vel=60, acc=80):
+    joint_deg = np.asarray(joint_deg, dtype=np.float64)
+
+    print(f"[INIT_MOVE_J] target joint = {joint_deg}")
+
+    ret = robot.move_j(rc, joint_deg, vel, acc)
+    rc.error().throw_if_not_empty()
+
+    if robot.wait_for_move_started(rc, 0.5).is_success():
+        robot.wait_for_move_finished(rc)
+    else:
+        print("[INIT_MOVE_J] move start check timeout, but continue waiting for finish")
+        robot.wait_for_move_finished(rc)
+
+    rc.error().throw_if_not_empty()
+
+    print("[INIT_MOVE_J] finished")
+
+# --------- initial move_j + desired setting ---------
+INIT_JOINT_DEG = np.array([90.0, 0.0, -90.0, 0.0, -90.0, 0.0], dtype=np.float64)
+
+# 기존 방식 유지: 목표 자세는 고정값으로 사용
+desired_rpy = np.array([90.0, 0.0, 0.0], dtype=np.float64)
+
+try:
+    # 1. 원하는 초기 joint 자세로 이동
+    rb_move_j_and_wait(INIT_JOINT_DEG, vel=60, acc=80)
+
+    # 2. 이동 후 안정화 시간
+    sleep(1.0)
+
+    # 3. 현재 TCP pose 읽기
+    current_tcp_pos, current_tcp_rpy = rb_get_tcp_pose()
+
+    # 4. 위치 목표만 현재 TCP 위치로 설정
+    desired_xpos_tcp = current_tcp_pos.copy()
+
+    print("[INIT] Desired TCP position is set from current TCP after move_j")
+    print(f"[INIT] current_tcp_pos  = {current_tcp_pos}")
+    print(f"[INIT] current_tcp_rpy  = {current_tcp_rpy}")
+    print(f"[INIT] desired_xpos_tcp = {desired_xpos_tcp}")
+    print(f"[INIT] desired_rpy      = {desired_rpy}")
+
+except Exception as e:
+    print(f"[INIT] move_j failed or desired TCP position setting failed: {e}")
+
+    # 실패해도 현재 위치를 목표 위치로 잡아서 갑자기 튀는 것 방지
+    current_tcp_pos, current_tcp_rpy = rb_get_tcp_pose()
+    desired_xpos_tcp = current_tcp_pos.copy()
+
+    print("[INIT] Fallback: Desired TCP position is set from current TCP")
+    print(f"[INIT] current_tcp_pos  = {current_tcp_pos}")
+    print(f"[INIT] current_tcp_rpy  = {current_tcp_rpy}")
+    print(f"[INIT] desired_xpos_tcp = {desired_xpos_tcp}")
+    print(f"[INIT] desired_rpy      = {desired_rpy}")
+# ----------------------------------------------------
 
 model_path = "/home/chu/chu_main/rb5/scene_rb5.xml"
 m = mujoco.MjModel.from_xml_path(model_path)
