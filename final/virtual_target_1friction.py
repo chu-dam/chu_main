@@ -109,8 +109,8 @@ def rb_move_j_and_wait(joint_deg, vel=60, acc=80):
 
 def virtual_offset_piecewise_mm(
     dist_m,
-    const_err_mm=70.0,
-    taper_dist_mm=10.0,
+    const_err_mm = 70.0,
+    taper_dist_mm = 15.0,
 ):
     dist_mm = dist_m * 1000.0
 
